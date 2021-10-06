@@ -13,21 +13,6 @@ from PIL import Image, ImageFont, ImageDraw
 from io import BytesIO
 
 
-def annotate_image(imagefile, text):
-    bluesky_path_as_list = bluesky.__path__[0].split('/') # crude, but finds current collection folder
-    font_path = os.path.join('/', *bluesky_path_as_list[:4], 'lib', 'python3.7', 'site-packages', 'matplotlib', 'mpl-data', 'fonts', 'ttf')
-    img = Image.open(imagefile)
-    width, height = img.size
-    draw = ImageDraw.Draw(img, 'RGBA')
-    draw.rectangle(((0, int(9.5*height/10)), (width, height)), fill=(255,255,255,125))
-    font = ImageFont.truetype(font_path + '/DejaVuSans.ttf', 24)
-    draw.text((int(0.2*width/10), int(9.6*height/10)), text, (0,0,0), font=font)
-    img.save(imagefile)
-
-def now(fmt="%Y-%m-%dT%H-%M-%S"):
-    return datetime.datetime.now().strftime(fmt)
-def today(fmt="%Y-%m-%d"):
-    return datetime.datetime.today().strftime(fmt)
 
 class WEBCAM_JPEG_HANDLER:
     def __init__(self, resource_path):
@@ -38,7 +23,9 @@ class WEBCAM_JPEG_HANDLER:
         filepath = self._template % index
         return numpy.asarray(Image.open(filepath))
 
-db.reg.register_handler("BEAMLINE_WEBCAM", WEBCAM_JPEG_HANDLER)
+from BMM import user_ns as user_ns_module
+user_ns = vars(user_ns_module)
+user_ns['db'].reg.register_handler("BEAMLINE_WEBCAM", WEBCAM_JPEG_HANDLER)
 
 class ExternalFileReference(Signal):
     """
@@ -60,19 +47,18 @@ class CameraSnapshot(Device):
     annotation_string = ''
     
     
-    def __init__(self, *args, base, bl, url, **kwargs):
+    def __init__(self, *args, base, url, **kwargs):
         super().__init__(*args, **kwargs)
         self._base = base
-        self._root = os.path.join(self._base, *today().split('-'))
+        self._root = os.path.join(self._base, *self.today().split('-'))
         self._acquiring_lock = threading.Lock()
         self._counter = None  # set to an itertools.count object when staged
         self._asset_docs_cache = []
-        self._beamline = bl
         self._SPEC = "BEAMLINE_WEBCAM"
         self._url = url
 
     def current_folder(self):
-        folder = os.path.join(self._base, *today().split('-'))
+        folder = os.path.join(self._base, *self.today().split('-'))
         if not os.path.isdir(folder):
             os.makedirs(folder)
         return folder
@@ -113,8 +99,8 @@ class CameraSnapshot(Device):
                 #print(f'w: {im.width}    h: {im.height}')
                 self.image.shape = (im.height, im.width, 3)
 
-                annotation = f'{self.beamline_id}      {self.annotation_string}       {now()}'
-                annotate_image(filename, annotation)
+                annotation = f'{self.beamline_id}      {self.annotation_string}       {self.now()}'
+                self.annotate_image(filename, annotation)
 
             datum = self._datum_factory({"index": i})
             self._asset_docs_cache.append(('datum', datum))
@@ -133,7 +119,23 @@ class CameraSnapshot(Device):
         thread.start()
         return status
 
+    def now(self, fmt="%Y-%m-%dT%H-%M-%S"):
+        return datetime.datetime.now().strftime(fmt)
+    def today(self, fmt="%Y-%m-%d-%H"):
+        return datetime.datetime.today().strftime(fmt)
+
+    def annotate_image(self, imagefile, text):
+        bluesky_path_as_list = bluesky.__path__[0].split('/') # crude, but finds current collection folder
+        font_path = os.path.join('/', *bluesky_path_as_list[:4], 'lib', 'python3.7', 'site-packages', 'matplotlib', 'mpl-data', 'fonts', 'ttf')
+        img = Image.open(imagefile)
+        width, height = img.size
+        draw = ImageDraw.Draw(img, 'RGBA')
+        draw.rectangle(((0, int(9.5*height/10)), (width, height)), fill=(255,255,255,125))
+        font = ImageFont.truetype(font_path + '/DejaVuSans.ttf', 24)
+        draw.text((int(0.2*width/10), int(9.6*height/10)), text, (0,0,0), font=font)
+        img.save(imagefile)
+
+        
 class AxisWebcam(CameraSnapshot):
-    def __init__(self, *args, root, bl, url, **kwargs):
-        url = url + '/axis-cgi/jpg/image.cgi'
-        super().__init__(self, *args, root, bl, url, **kwargs))
+    def __init__(self, *args, base, address, **kwargs):
+        super().__init__(*args, base=base, url=f'http://{address}/axis-cgi/jpg/image.cgi', **kwargs)
